@@ -1,0 +1,87 @@
+name: OCI Instance Retry
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install OCI CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh > install.sh
+          chmod +x install.sh
+          ./install.sh --accept-all-defaults
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Configure OCI CLI
+        run: |
+          mkdir -p ~/.oci
+          echo "[DEFAULT]" > ~/.oci/config
+          echo "user=${{ secrets.OCI_USER_OCID }}" >> ~/.oci/config
+          echo "fingerprint=${{ secrets.OCI_FINGERPRINT }}" >> ~/.oci/config
+          echo "tenancy=${{ secrets.OCI_TENANCY_OCID }}" >> ~/.oci/config
+          echo "region=${{ secrets.OCI_REGION }}" >> ~/.oci/config
+          echo "key_file=~/.oci/oci_api_key.pem" >> ~/.oci/config
+          echo "${{ secrets.OCI_PRIVATE_KEY }}" > ~/.oci/oci_api_key.pem
+          chmod 600 ~/.oci/oci_api_key.pem
+
+      - name: Check if instance already exists
+        id: check
+        run: |
+          EXISTING=$(oci compute instance list \
+            --compartment-id ${{ secrets.OCI_TENANCY_OCID }} \
+            --display-name "ollama-server" \
+            --lifecycle-state RUNNING \
+            --query 'data[0].id' \
+            --raw-output 2>/dev/null || echo "")
+          if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then
+            echo "Instance already running: $EXISTING"
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Attempt instance creation
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          echo "${{ secrets.SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub
+
+          AVAILABILITY_DOMAINS=(
+            "QHpL:UK-LONDON-1-AD-1"
+            "QHpL:UK-LONDON-1-AD-2"
+            "QHpL:UK-LONDON-1-AD-3"
+          )
+
+          for AD in "${AVAILABILITY_DOMAINS[@]}"; do
+            echo "Trying $AD..."
+            RESULT=$(oci compute instance launch \
+              --availability-domain "$AD" \
+              --compartment-id "${{ secrets.OCI_TENANCY_OCID }}" \
+              --shape "VM.Standard.A1.Flex" \
+              --shape-config '{"ocpus": 4, "memoryInGBs": 24}' \
+              --image-id "ocid1.image.oc1.uk-london-1.aaaaaaaarlzudoyt5g2ofuqhmkak5bcosbqstkcutdpx3eva5dc7t4v5wgpq" \
+              --subnet-id "ocid1.subnet.oc1.uk-london-1.aaaaaaaaxws72obbnue5sypijv4gfmlsg26kcl5ak3aackv7uvztaxccsz5q" \
+              --assign-public-ip true \
+              --display-name "ollama-server" \
+              --boot-volume-size-in-gbs 60 \
+              --ssh-authorized-keys-file /tmp/ssh_key.pub \
+              2>&1)
+
+            if echo "$RESULT" | grep -q '"lifecycle-state"'; then
+              echo "✅ SUCCESS in $AD!"
+              echo "$RESULT" | grep -E '"id"|"lifecycle-state"'
+              exit 0
+            else
+              echo "❌ No capacity in $AD"
+            fi
+          done
+
+          echo "No capacity found this run — will retry in 5 minutes"
+
+      - name: Instance already exists
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          echo "✅ Instance is already running — disable this workflow in GitHub Actions"
