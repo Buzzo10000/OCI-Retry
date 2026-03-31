@@ -76,10 +76,12 @@ jobs:
               exit 0
             else
               echo "❌ No capacity in $AD"
+              echo "Full response: $RESULT"
             fi
           done
 
           echo "No capacity found this run — will retry in 5 minutes"
+          exit 0
 
       - name: Instance already exists
         if: steps.check.outputs.exists == 'true'
