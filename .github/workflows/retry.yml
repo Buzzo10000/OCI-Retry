@@ -30,6 +30,8 @@ jobs:
           echo "key_file=~/.oci/oci_api_key.pem" >> ~/.oci/config
           echo "${{ secrets.OCI_PRIVATE_KEY }}" > ~/.oci/oci_api_key.pem
           chmod 600 ~/.oci/oci_api_key.pem
+          chmod 600 ~/.oci/config
+          export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True
 
       - name: Check if instance already exists
         id: check
@@ -38,6 +40,8 @@ jobs:
 
       - name: Attempt instance creation
         if: steps.check.outputs.exists == 'false'
+        env:
+          OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING: "True"
         run: |
           export PATH="$HOME/lib/oracle-cli/bin:$HOME/bin:$PATH"
           echo "OCI CLI version: $(oci --version)"
@@ -45,7 +49,6 @@ jobs:
           echo "SSH key contents:"
           cat /tmp/ssh_key.pub
 
-          SHAPE_CONFIG='{"ocpus": 4, "memoryInGBs": 24}'
           COMPARTMENT="${{ secrets.OCI_TENANCY_OCID }}"
           IMAGE="ocid1.image.oc1.uk-london-1.aaaaaaaarlzudoyt5g2ofuqhmkak5bcosbqstkcutdpx3eva5dc7t4v5wgpq"
           SUBNET="ocid1.subnet.oc1.uk-london-1.aaaaaaaaxws72obbnue5sypijv4gfmlsg26kcl5ak3aackv7uvztaxccsz5q"
@@ -62,7 +65,7 @@ jobs:
               --availability-domain "$AD" \
               --compartment-id "$COMPARTMENT" \
               --shape "VM.Standard.A1.Flex" \
-              --shape-config "$SHAPE_CONFIG" \
+              --shape-config '{"ocpus": 4, "memoryInGBs": 24}' \
               --image-id "$IMAGE" \
               --subnet-id "$SUBNET" \
               --assign-public-ip true \
