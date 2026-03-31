@@ -53,7 +53,7 @@ jobs:
         run: |
           export PATH="$HOME/lib/oracle-cli/bin:$HOME/bin:$PATH"
           echo "OCI CLI version: $(oci --version)"
-          echo "${{ secrets.SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub
+          echo "${{ secrets.SSH_PUBLIC_KEY }}" | base64 -d > /tmp/ssh_key.pub
           echo "SSH key contents:"
           cat /tmp/ssh_key.pub
 
