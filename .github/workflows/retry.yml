@@ -100,4 +100,70 @@ jobs:
       - name: Instance already exists
         if: steps.check.outputs.exists == 'true'
         run: |
+          echo "✅ Instance is already running — disable this workflow in GitHub Actions"          export PATH="$HOME/lib/oracle-cli/bin:$HOME/bin:$PATH"
+          EXISTING=$(oci compute instance list \
+            --compartment-id ${{ secrets.OCI_TENANCY_OCID }} \
+            --display-name "ollama-server" \
+            --lifecycle-state RUNNING \
+            --query 'data[0].id' \
+            --raw-output 2>/dev/null || echo "")
+          if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then
+            echo "Instance already running: $EXISTING"
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Attempt instance creation
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          export PATH="$HOME/lib/oracle-cli/bin:$HOME/bin:$PATH"
+          echo "OCI CLI version: $(oci --version)"
+          echo "${{ secrets.SSH_PUBLIC_KEY }}" | base64 -d > /tmp/ssh_key.pub
+          echo "SSH key contents:"
+          cat /tmp/ssh_key.pub
+
+          SHAPE_CONFIG='{"ocpus": 4, "memoryInGBs": 24}'
+          COMPARTMENT="${{ secrets.OCI_TENANCY_OCID }}"
+          IMAGE="ocid1.image.oc1.uk-london-1.aaaaaaaarlzudoyt5g2ofuqhmkak5bcosbqstkcutdpx3eva5dc7t4v5wgpq"
+          SUBNET="ocid1.subnet.oc1.uk-london-1.aaaaaaaaxws72obbnue5sypijv4gfmlsg26kcl5ak3aackv7uvztaxccsz5q"
+
+          AVAILABILITY_DOMAINS=(
+            "QHpL:UK-LONDON-1-AD-1"
+            "QHpL:UK-LONDON-1-AD-2"
+            "QHpL:UK-LONDON-1-AD-3"
+          )
+
+          for AD in "${AVAILABILITY_DOMAINS[@]}"; do
+            echo "Trying $AD..."
+            RESULT=$(oci compute instance launch \
+              --availability-domain "$AD" \
+              --compartment-id "$COMPARTMENT" \
+              --shape "VM.Standard.A1.Flex" \
+              --shape-config "$SHAPE_CONFIG" \
+              --image-id "$IMAGE" \
+              --subnet-id "$SUBNET" \
+              --assign-public-ip true \
+              --display-name "ollama-server" \
+              --boot-volume-size-in-gbs 60 \
+              --ssh-authorized-keys-file /tmp/ssh_key.pub \
+              2>&1) || true
+
+            echo "Response from $AD:"
+            echo "$RESULT"
+
+            if echo "$RESULT" | grep -q '"lifecycle-state"'; then
+              echo "✅ SUCCESS in $AD!"
+              exit 0
+            else
+              echo "❌ No capacity in $AD"
+            fi
+          done
+
+          echo "No capacity found this run — will retry in 5 minutes"
+          exit 0
+
+      - name: Instance already exists
+        if: steps.check.outputs.exists == 'true'
+        run: |
           echo "✅ Instance is already running — disable this workflow in GitHub Actions"
