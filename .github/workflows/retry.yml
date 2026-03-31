@@ -57,6 +57,11 @@ jobs:
           echo "SSH key contents:"
           cat /tmp/ssh_key.pub
 
+          SHAPE_CONFIG='{"ocpus": 4, "memoryInGBs": 24}'
+          COMPARTMENT="${{ secrets.OCI_TENANCY_OCID }}"
+          IMAGE="ocid1.image.oc1.uk-london-1.aaaaaaaarlzudoyt5g2ofuqhmkak5bcosbqstkcutdpx3eva5dc7t4v5wgpq"
+          SUBNET="ocid1.subnet.oc1.uk-london-1.aaaaaaaaxws72obbnue5sypijv4gfmlsg26kcl5ak3aackv7uvztaxccsz5q"
+
           AVAILABILITY_DOMAINS=(
             "QHpL:UK-LONDON-1-AD-1"
             "QHpL:UK-LONDON-1-AD-2"
@@ -67,11 +72,11 @@ jobs:
             echo "Trying $AD..."
             RESULT=$(oci compute instance launch \
               --availability-domain "$AD" \
-              --compartment-id "${{ secrets.OCI_TENANCY_OCID }}" \
+              --compartment-id "$COMPARTMENT" \
               --shape "VM.Standard.A1.Flex" \
-              --shape-config '{"ocpus": 4, "memoryInGBs": 24}' \
-              --image-id "ocid1.image.oc1.uk-london-1.aaaaaaaarlzudoyt5g2ofuqhmkak5bcosbqstkcutdpx3eva5dc7t4v5wgpq" \
-              --subnet-id "ocid1.subnet.oc1.uk-london-1.aaaaaaaaxws72obbnue5sypijv4gfmlsg26kcl5ak3aackv7uvztaxccsz5q" \
+              --shape-config "$SHAPE_CONFIG" \
+              --image-id "$IMAGE" \
+              --subnet-id "$SUBNET" \
               --assign-public-ip true \
               --display-name "ollama-server" \
               --boot-volume-size-in-gbs 60 \
@@ -84,3 +89,15 @@ jobs:
             if echo "$RESULT" | grep -q '"lifecycle-state"'; then
               echo "✅ SUCCESS in $AD!"
               exit 0
+            else
+              echo "❌ No capacity in $AD"
+            fi
+          done
+
+          echo "No capacity found this run — will retry in 5 minutes"
+          exit 0
+
+      - name: Instance already exists
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          echo "✅ Instance is already running — disable this workflow in GitHub Actions"
