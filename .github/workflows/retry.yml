@@ -43,12 +43,7 @@ jobs:
           OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING: "True"
         run: |
           export PATH="$HOME/lib/oracle-cli/bin:$HOME/bin:$PATH"
-          echo "OCI CLI version: $(oci --version)"
-
           echo "${{ secrets.SSH_PUBLIC_KEY }}" | base64 -d > /tmp/ssh_key.pub
-          echo "SSH key file size: $(wc -c < /tmp/ssh_key.pub)"
-          echo "SSH key line count: $(wc -l < /tmp/ssh_key.pub)"
-          xxd /tmp/ssh_key.pub | tail -5
 
           COMPARTMENT="${{ secrets.OCI_TENANCY_OCID }}"
           IMAGE="ocid1.image.oc1.uk-london-1.aaaaaaaarlzudoyt5g2ofuqhmkak5bcosbqstkcutdpx3eva5dc7t4v5wgpq"
@@ -73,14 +68,13 @@ jobs:
               --display-name "ollama-server" \
               --boot-volume-size-in-gbs 60 \
               --ssh-authorized-keys-file /tmp/ssh_key.pub \
-              --debug \
               2>&1) || true
 
-            echo "Response from $AD:"
-            echo "$RESULT"
+            echo "Response from $AD: $RESULT"
 
             if echo "$RESULT" | grep -q '"lifecycle-state"'; then
               echo "✅ SUCCESS in $AD!"
+              echo "$RESULT" | grep -E '"id"|"lifecycle-state"|"public-ip"'
               exit 0
             else
               echo "❌ No capacity in $AD"
