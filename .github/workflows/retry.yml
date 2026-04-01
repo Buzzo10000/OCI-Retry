@@ -1,12 +1,10 @@
 name: OCI Instance Retry
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
-  retry:
+  retry-london:
     runs-on: ubuntu-latest
     steps:
       - name: Install OCI CLI
@@ -20,7 +18,6 @@ jobs:
       - name: Configure OCI CLI
         run: |
           export PATH="$HOME/lib/oracle-cli/bin:$HOME/bin:$PATH"
-          oci --version
           mkdir -p ~/.oci
           echo "[DEFAULT]" > ~/.oci/config
           echo "user=${{ secrets.OCI_USER_OCID }}" >> ~/.oci/config
@@ -32,13 +29,7 @@ jobs:
           chmod 600 ~/.oci/oci_api_key.pem
           chmod 600 ~/.oci/config
 
-      - name: Check if instance already exists
-        id: check
-        run: |
-          echo "exists=false" >> $GITHUB_OUTPUT
-
-      - name: Attempt instance creation
-        if: steps.check.outputs.exists == 'false'
+      - name: Attempt London instance creation
         env:
           OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING: "True"
         run: |
@@ -51,12 +42,11 @@ jobs:
 
           AVAILABILITY_DOMAINS=(
             "QHpL:UK-LONDON-1-AD-1"
-            "QHpL:UK-LONDON-1-AD-2"
             "QHpL:UK-LONDON-1-AD-3"
           )
 
           for AD in "${AVAILABILITY_DOMAINS[@]}"; do
-            echo "Trying $AD..."
+            echo "Trying London $AD..."
             RESULT=$(oci compute instance launch \
               --availability-domain "$AD" \
               --compartment-id "$COMPARTMENT" \
@@ -70,21 +60,85 @@ jobs:
               --ssh-authorized-keys-file /tmp/ssh_key.pub \
               2>&1) || true
 
-            echo "Response from $AD: $RESULT"
+            echo "Response from London $AD: $RESULT"
 
             if echo "$RESULT" | grep -q '"lifecycle-state"'; then
-              echo "✅ SUCCESS in $AD!"
-              echo "$RESULT" | grep -E '"id"|"lifecycle-state"|"public-ip"'
+              echo "✅ SUCCESS in London $AD!"
               exit 0
             else
-              echo "❌ No capacity in $AD"
+              echo "❌ No capacity in London $AD"
             fi
           done
 
-          echo "No capacity found this run — will retry in 5 minutes"
+          echo "No London capacity this run"
           exit 0
 
-      - name: Instance already exists
-        if: steps.check.outputs.exists == 'true'
+  retry-frankfurt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install OCI CLI
         run: |
-          echo "✅ Instance is already running — disable this workflow in GitHub Actions"
+          curl -fsSL https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh > install.sh
+          chmod +x install.sh
+          ./install.sh --accept-all-defaults
+          echo "$HOME/lib/oracle-cli/bin" >> $GITHUB_PATH
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Configure OCI CLI
+        run: |
+          export PATH="$HOME/lib/oracle-cli/bin:$HOME/bin:$PATH"
+          mkdir -p ~/.oci
+          echo "[DEFAULT]" > ~/.oci/config
+          echo "user=${{ secrets.FRA_OCI_USER_OCID }}" >> ~/.oci/config
+          echo "fingerprint=${{ secrets.FRA_OCI_FINGERPRINT }}" >> ~/.oci/config
+          echo "tenancy=${{ secrets.FRA_OCI_TENANCY_OCID }}" >> ~/.oci/config
+          echo "region=${{ secrets.FRA_OCI_REGION }}" >> ~/.oci/config
+          echo "key_file=~/.oci/oci_api_key.pem" >> ~/.oci/config
+          echo "${{ secrets.FRA_OCI_PRIVATE_KEY }}" > ~/.oci/oci_api_key.pem
+          chmod 600 ~/.oci/oci_api_key.pem
+          chmod 600 ~/.oci/config
+
+      - name: Attempt Frankfurt instance creation
+        env:
+          OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING: "True"
+        run: |
+          export PATH="$HOME/lib/oracle-cli/bin:$HOME/bin:$PATH"
+          echo "${{ secrets.FRA_SSH_PUBLIC_KEY }}" | base64 -d > /tmp/ssh_key.pub
+
+          COMPARTMENT="${{ secrets.FRA_OCI_TENANCY_OCID }}"
+          IMAGE="ocid1.image.oc1.eu-frankfurt-1.aaaaaaaasoblespfnzqa67jnq4psbpnbal4mlh2tpwnlhnhvmkhzuqbrxu4a"
+          SUBNET="ocid1.subnet.oc1.eu-frankfurt-1.aaaaaaaaihavhrhvnni5mxpes6gs5kszek6umyqysbveievwuqgibsdfzpaa"
+
+          AVAILABILITY_DOMAINS=(
+            "oVXF:EU-FRANKFURT-1-AD-1"
+            "oVXF:EU-FRANKFURT-1-AD-2"
+            "oVXF:EU-FRANKFURT-1-AD-3"
+          )
+
+          for AD in "${AVAILABILITY_DOMAINS[@]}"; do
+            echo "Trying Frankfurt $AD..."
+            RESULT=$(oci compute instance launch \
+              --availability-domain "$AD" \
+              --compartment-id "$COMPARTMENT" \
+              --shape "VM.Standard.A1.Flex" \
+              --shape-config '{"ocpus": 4, "memoryInGBs": 24}' \
+              --image-id "$IMAGE" \
+              --subnet-id "$SUBNET" \
+              --assign-public-ip true \
+              --display-name "ollama-server-frankfurt" \
+              --boot-volume-size-in-gbs 60 \
+              --ssh-authorized-keys-file /tmp/ssh_key.pub \
+              2>&1) || true
+
+            echo "Response from Frankfurt $AD: $RESULT"
+
+            if echo "$RESULT" | grep -q '"lifecycle-state"'; then
+              echo "✅ SUCCESS in Frankfurt $AD!"
+              exit 0
+            else
+              echo "❌ No capacity in Frankfurt $AD"
+            fi
+          done
+
+          echo "No Frankfurt capacity this run"
+          exit 0
